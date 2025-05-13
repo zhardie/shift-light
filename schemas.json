@@ -3,7 +3,6 @@
   "games": {
     "dirt_rally_2": {
       "name": "Dirt Rally 2.0",
-      },
       "fields": {
         "gear": {
           "offset": 33,
