@@ -1,0 +1,10 @@
+{
+    "wifi_ssid": "CHANGE_ME",
+    "wifi_password": "CHANGE_ME",
+    "sim_ip": "CHANGE_ME",
+    "led_ring_brightness": 0.1,
+    "led_green_breakpoint": 0.4,
+    "led_yellow_breakpoint": 0.87,
+    "led_redline_flash_above": 0.94,
+    "allow_idle_animations": true
+}
