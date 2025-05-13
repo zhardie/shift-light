@@ -6,6 +6,8 @@ import json
 import struct
 from neopixel import NeoPixel
 import uasyncio as asyncio
+import urequests
+import gc
 
 import simulation
 import wifi
@@ -23,6 +25,10 @@ conf = {}
 with open('config.json', 'r') as f:
     conf = json.load(f)
 
+# Add schema URL to config or hardcode it here
+SCHEMA_URL = "https://raw.githubusercontent.com/zhardie/shift-light/main/schemas.json"
+LOCAL_SCHEMA_FILE = "schemas.json"
+
 np = NeoPixel(Pin(3), num_pixels)
 
 connected = wifi.connect_wifi(ssid=conf['wifi_ssid'], password=conf['wifi_password'], max_retries=10, display=display)
@@ -31,7 +37,6 @@ display.show()
 
 # Test data
 test_data = simulation.generate_simple_rpm_simulation()
-
 
 gear_map = {
     0: 'N',
@@ -90,141 +95,69 @@ def display_gear(bitmap):
     # Update the display
     display.show()
 
-def decode_dirt_rally(data):
-    if len(data) >= 152:  # Ensure enough data for gear and rpm (148 + 4)
-        gear_float = struct.unpack_from('f', data, offset=132)[0]
-        rpm_float = struct.unpack_from('f', data, offset=148)[0]
-        gear = int(gear_float)
-        rpm = int(rpm_float * 10)
-        return gear, rpm
-    else:
-        return None, None
+def display_text(text, x=0, y=0, clear=True):
+    """Display text on the OLED screen"""
+    if clear:
+        display.fill(0)
+    display.text(text, x, y)
+    display.show()
 
-async def sim_task(gauge):
-    """Collect data from simulator and update gauge"""
-    port = 20777
-    sock = None
-    
-    # Idle state tracking
-    last_data_time = time.time()
-    idle_timeout = 5  # Seconds before showing idle animation
-    is_idle_mode = False
+# Schema Management Functions
+def load_local_schema():
+    """Load schema from local file"""
+    try:
+        with open(LOCAL_SCHEMA_FILE, 'r') as f:
+            return json.load(f)
+    except:
+        return {"version": 0, "games": {}}
+
+def save_local_schema(schema):
+    """Save schema to local file"""
+    try:
+        with open(LOCAL_SCHEMA_FILE, 'w') as f:
+            json.dump(schema, f)
+        return True
+    except:
+        return False
+
+def check_schema_update():
+    """Check for schema updates and download if newer version available"""
+    display_text("Checking for updates...")
     
     try:
-        # Create socket once outside the loop
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind((conf['sim_ip'], port))
-        sock.setblocking(False)
-        print(f"Listening for telemetry on port {port}")
+        # Load current schema
+        local_schema = load_local_schema()
+        local_version = local_schema.get("version", 0)
         
-        last_gear = None
+        # Try to get remote schema info first to check version
+        response = urequests.get(SCHEMA_URL)
+        if response.status_code != 200:
+            display_text("Update check failed", 0, 0)
+            time.sleep(1)
+            return local_schema
+            
+        # Parse the remote schema
+        remote_schema = response.json()
+        response.close()
+        remote_version = remote_schema.get("version", 0)
         
-        while True:
-            try:
-                data_received = False
-                
-                # Try to receive data
-                try:
-                    data = sock.recv(512)
-                    # Process the received data
-                    #telemetry = json.loads(data)
-                    
-                    dirt_data = struct.unpack('64f', data[0:256])
-                    
-                    gear = int(dirt_data[33])
-                    rpm = int(dirt_data[37])*10
-                    
-                    #rpm = telemetry.get('rpm', 0)
-                    #gear = telemetry.get('gear', 1)
-                    if rpm > gauge.max_rpm:
-                        gauge.max_rpm = rpm
-                    
-                    # Data received, update last data time
-                    last_data_time = time.time()
-                    data_received = True
-                    
-                    # We were in idle mode but just received data
-                    if is_idle_mode:
-                        is_idle_mode = False
-                        print("Telemetry received - exiting idle mode")
-                    
-                    # Calculate normalized rpm (0.0 to 1.0)
-                    rpm_normalized = rpm / gauge.max_rpm
-                    
-                    # Store the RPM level but only update display if not at redline
-                    gauge.level = rpm_normalized
-                    if rpm_normalized < conf['led_redline_flash_above']:
-                        gauge.set_gauge_level(rpm_normalized)
-                    
-                    # Update gear display only when gear changes
-                    gear_str = str(gear) if isinstance(gear, int) else gear
-                    if gear_str in digits.digits and gear != last_gear:
-                        display_gear(digits.digits[gear_str])
-                        last_gear = gear
-                        
-                except OSError:
-                    # No data available yet
-                    pass
-                
-                # Check if we should switch to idle mode
-                current_time = time.time()
-                if not data_received and not is_idle_mode and (current_time - last_data_time) > idle_timeout:
-                    # Switch to idle mode
-                    is_idle_mode = True
-                    gauge.max_rpm = 3000
-                    print("No telemetry received for 5 seconds - entering idle mode")
-                    display.fill(0)
-                    display.show()
-                    
-                    # Create and run the idle animation asynchronously
-                    if conf['allow_idle_animations']:
-                        asyncio.create_task(run_idle_animation(gauge))
-                    else:
-                        set_color_all(0, 0, 0)
-                
-                # Short delay before next iteration
-                await asyncio.sleep_ms(10)
-                
-            except Exception as e:
-                print(f"Error processing data: {e}")
-                await asyncio.sleep(1)
+        # If remote version is newer, update local schema
+        if remote_version > local_version:
+            display_text(f"Updating v{local_version} -> v{remote_version}", 0, 0)
+            save_local_schema(remote_schema)
+            time.sleep(1)
+            display_text("Update complete", 0, 0)
+            time.sleep(1)
+            gc.collect()  # Free memory
+            return remote_schema
+        else:
+            display_text("Up to date", 0, 0)
+            time.sleep(1)
+            return local_schema
     except Exception as e:
-        print(f"Socket error: {e}")
-    finally:
-        if sock:
-            sock.close()
-
-async def run_idle_animation(gauge):
-    """Run the idle animation until telemetry data is received again"""
-    # Set a flag to indicate we're in idle mode
-    gauge.in_idle_mode = True
-    
-    # Use a cyan color for the idle animation
-    r, g, b = 0, 150, 150
-    
-    try:
-        # Run the idle animation until we're no longer in idle mode
-        while getattr(gauge, 'in_idle_mode', True):
-            # Breathe in
-            for i in range(0, 101, 5):
-                if not getattr(gauge, 'in_idle_mode', True):
-                    break
-                    
-                intensity = i / 100.0
-                set_color_all(r * intensity, g * intensity, b * intensity, conf['led_ring_brightness'] * 0.5)
-                await asyncio.sleep_ms(50)
-                
-            # Breathe out
-            for i in range(100, -1, -5):
-                if not getattr(gauge, 'in_idle_mode', True):
-                    break
-                    
-                intensity = i / 100.0
-                set_color_all(r * intensity, g * intensity, b * intensity, conf['led_ring_brightness'] * 0.5)
-                await asyncio.sleep_ms(50)
-    finally:
-        # Reset the flag when we exit the idle animation
-        gauge.in_idle_mode = False
+        display_text(f"Update error: {e}", 0, 0)
+        time.sleep(2)
+        return local_schema
 
 class Gauge():
     def __init__(self):
@@ -233,7 +166,52 @@ class Gauge():
         self.flashed = False
         self.flash_cycles = 0
         self.increasing = True
-        self.in_idle_mode = False  # Add this line
+        self.in_idle_mode = False
+        self.detected_game = None
+        self.game_schemas = {}
+        
+    def set_schemas(self, schemas):
+        """Set the game schemas for the gauge"""
+        self.game_schemas = schemas.get("games", {})
+        
+    def detect_game(self, data):
+        """Detect which game sent the data"""
+        if self.detected_game:
+            # We already have a detected game, use its schema
+            return self.detected_game
+            
+        for game_id, schema in self.game_schemas.items():
+            try:
+                # Try to unpack according to schema signature
+                gear, rpm = self.unpack_game_data(game_id, data)
+                
+                if gear in [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8] and (0 < rpm < 20000):                
+                    # Game detected!
+                    self.detected_game = game_id
+                    print(f"Game: {schema.get('name', game_id)}")
+                    return game_id
+            except Exception as e:
+                print(e)
+                pass
+        
+        return None
+        
+    def unpack_game_data(self, game_id, data):
+        """Unpack data according to the schema for the identified game"""
+        if game_id not in self.game_schemas:
+            return None, None
+
+        schema = self.game_schemas[game_id]
+        fields = schema.get("fields", {})
+        gear_info = fields["gear"]
+        rpm_info = fields["rpm"]
+        
+        game_data = struct.unpack('64f', data[0:256])
+
+        gear = int(game_data[gear_info["offset"]]* gear_info["multiplier"])
+        rpm = int(game_data[rpm_info["offset"]] * rpm_info["multiplier"])
+
+        return gear, rpm
         
     def set_gauge_level(self, level):
         # Exit idle mode if we're updating the gauge
@@ -331,11 +309,146 @@ class Gauge():
             display_gear(digits.digits[d])
             time.sleep(50/1000)
 
-async def main():
-    gauge = Gauge()
-    gauge.gauge_sweep(1)
+async def sim_task(gauge):
+    """Collect data from simulator and update gauge"""
+    port = 20777
+    sock = None
+    
+    # Idle state tracking
+    last_data_time = time.time()
+    idle_timeout = 5  # Seconds before showing idle animation
+    is_idle_mode = False
+    
+    try:
+        # Create socket once outside the loop
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((conf['sim_ip'], port))
+        sock.setblocking(False)
+        print(f"Listening for telemetry on port {port}")
+        
+        last_gear = None
+        
+        while True:
+            try:
+                data_received = False
+                
+                # Try to receive data
+                try:
+                    data = sock.recv(512)
+                    
+                    # Try to detect which game is sending data
+                    game_id = gauge.detect_game(data)
+                    
+                    if game_id:
+                        # Process the data according to the game schema
+                        gear, rpm = gauge.unpack_game_data(game_id, data)
+                        
+                        if rpm is not None and gear is not None:
+                            if rpm > gauge.max_rpm:
+                                gauge.max_rpm = rpm
+                            
+                            # Data received, update last data time
+                            last_data_time = time.time()
+                            data_received = True
+                            
+                            # We were in idle mode but just received data
+                            if is_idle_mode:
+                                is_idle_mode = False
+                                gauge.in_idle_mode = False
+                                print("Telemetry received - exiting idle mode")
+                            
+                            # Calculate normalized rpm (0.0 to 1.0)
+                            rpm_normalized = rpm / gauge.max_rpm
+                            
+                            # Store the RPM level but only update display if not at redline
+                            gauge.level = rpm_normalized
+                            if rpm_normalized < conf['led_redline_flash_above']:
+                                gauge.set_gauge_level(rpm_normalized)
 
-    # Check for new Schema here and download if new one available
+                            # Update gear display only when gear changes
+                            gear_str = str(gear) if isinstance(gear, int) else gear
+                            if gear_str in digits.digits and gear != last_gear:
+                                display_gear(digits.digits[gear_str])
+                                last_gear = gear
+                    
+                except OSError:
+                    # No data available yet
+                    pass
+                
+                # Check if we should switch to idle mode
+                current_time = time.time()
+                if not data_received and not is_idle_mode and (current_time - last_data_time) > idle_timeout:
+                    # Switch to idle mode
+                    is_idle_mode = True
+                    gauge.in_idle_mode = True
+                    gauge.detected_game = None  # Clear detected game when idle
+                    gauge.max_rpm = 3000
+                    print("No telemetry received for 5 seconds - entering idle mode")
+                    display.fill(0)
+                    display.show()
+                    
+                    # Create and run the idle animation asynchronously
+                    if conf['allow_idle_animations']:
+                        asyncio.create_task(run_idle_animation(gauge))
+                    else:
+                        set_color_all(0, 0, 0)
+                
+                # Short delay before next iteration
+                await asyncio.sleep_ms(10)
+                
+            except Exception as e:
+                print(f"Error processing data: {e}")
+                await asyncio.sleep(1)
+    except Exception as e:
+        print(f"Socket error: {e}")
+    finally:
+        if sock:
+            sock.close()
+
+async def run_idle_animation(gauge):
+    """Run the idle animation until telemetry data is received again"""
+    # Set a flag to indicate we're in idle mode
+    gauge.in_idle_mode = True
+    
+    # Use a cyan color for the idle animation
+    r, g, b = 0, 150, 150
+    
+    try:
+        # Run the idle animation until we're no longer in idle mode
+        while getattr(gauge, 'in_idle_mode', True):
+            # Breathe in
+            for i in range(0, 101, 5):
+                if not getattr(gauge, 'in_idle_mode', True):
+                    break
+                    
+                intensity = i / 100.0
+                set_color_all(r * intensity, g * intensity, b * intensity, conf['led_ring_brightness'] * 0.5)
+                await asyncio.sleep_ms(50)
+                
+            # Breathe out
+            for i in range(100, -1, -5):
+                if not getattr(gauge, 'in_idle_mode', True):
+                    break
+                    
+                intensity = i / 100.0
+                set_color_all(r * intensity, g * intensity, b * intensity, conf['led_ring_brightness'] * 0.5)
+                await asyncio.sleep_ms(50)
+    finally:
+        # Reset the flag when we exit the idle animation
+        gauge.in_idle_mode = False
+
+async def main():
+    display_text("Sim Racing Dash", 0, 0)
+    display_text("Starting up...", 0, 16)
+    time.sleep(1)
+    
+    gauge = Gauge()
+    
+    # Check for schema updates at startup
+    schemas = check_schema_update()
+    gauge.set_schemas(schemas)
+    
+    gauge.gauge_sweep(1)
 
     sim_task_handle = asyncio.create_task(sim_task(gauge))
     redline_task = asyncio.create_task(gauge.check_redline())
