@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "games": {
     "dirt_rally_2": {
       "name": "Dirt Rally 2.0",
@@ -10,7 +10,7 @@
           "multiplier": 1
         },
         "rpm": {
-          "offset": 33,
+          "offset": 37,
           "format": "f",
           "multiplier": 10
         }
