@@ -335,6 +335,8 @@ async def main():
     gauge = Gauge()
     gauge.gauge_sweep(1)
 
+    # Check for new Schema here and download if new one available
+
     sim_task_handle = asyncio.create_task(sim_task(gauge))
     redline_task = asyncio.create_task(gauge.check_redline())
 

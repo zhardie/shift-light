@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "games": {
+    "dirt_rally_2": {
+      "name": "Dirt Rally 2.0",
+      "signature": {
+        "pattern": "f",
+        "offset": 0,
+        "validity_check": {
+          "index": 0,
+          "value": 1.0
+        }
+      },
+      "fields": {
+        "gear": {
+          "offset": 132,
+          "format": "f",
+          "multiplier": 1
+        },
+        "rpm": {
+          "offset": 148,
+          "format": "f",
+          "multiplier": 10
+        }
+      }
+    }
+  }
+}
