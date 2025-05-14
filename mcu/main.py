@@ -24,7 +24,7 @@ conf = {}
 with open('config.json', 'r') as f:
     conf = json.load(f)
 
-SCHEMA_URL = "https://raw.githubusercontent.com/zhardie/shift-light/refs/heads/main/schemas.json"
+SCHEMA_URL = "https://raw.githubusercontent.com/zhardie/shift-light/refs/heads/main/mcu/schemas.json"
 LOCAL_SCHEMA_FILE = "schemas.json"
 
 np = NeoPixel(Pin(3), num_pixels)
