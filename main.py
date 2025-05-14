@@ -9,7 +9,6 @@ import uasyncio as asyncio
 import urequests
 import gc
 
-import simulation
 import wifi
 
 from fonts import digits
@@ -25,8 +24,7 @@ conf = {}
 with open('config.json', 'r') as f:
     conf = json.load(f)
 
-# Add schema URL to config or hardcode it here
-SCHEMA_URL = "https://raw.githubusercontent.com/zhardie/shift-light/main/schemas.json"
+SCHEMA_URL = "https://raw.githubusercontent.com/zhardie/shift-light/refs/heads/main/schemas.json"
 LOCAL_SCHEMA_FILE = "schemas.json"
 
 np = NeoPixel(Pin(3), num_pixels)
@@ -34,23 +32,6 @@ np = NeoPixel(Pin(3), num_pixels)
 connected = wifi.connect_wifi(ssid=conf['wifi_ssid'], password=conf['wifi_password'], max_retries=10, display=display)
 display.fill(0)
 display.show()
-
-# Test data
-test_data = simulation.generate_simple_rpm_simulation()
-
-gear_map = {
-    0: 'N',
-    1: '1',
-    2: '2',
-    3: '3',
-    4: '4',
-    5: '5',
-    6: '6',
-    7: '7',
-    8: '8',
-    9: '9',
-    -1: 'R'
-}
 
 def set_color_all(r, g, b, brightness=conf['led_ring_brightness']):
     """
@@ -138,6 +119,7 @@ def check_schema_update():
             
         # Parse the remote schema
         remote_schema = response.json()
+        print(remote_schema)
         response.close()
         remote_version = remote_schema.get("version", 0)
         
@@ -155,7 +137,8 @@ def check_schema_update():
             time.sleep(1)
             return local_schema
     except Exception as e:
-        display_text(f"Update error: {e}", 0, 0)
+        display_text(f"Update error", 0, 0)
+        print(f"Update error: {e}")
         time.sleep(2)
         return local_schema
 
@@ -169,6 +152,7 @@ class Gauge():
         self.in_idle_mode = False
         self.detected_game = None
         self.game_schemas = {}
+        self.gear_map = {}
         
     def set_schemas(self, schemas):
         """Set the game schemas for the gauge"""
@@ -183,12 +167,17 @@ class Gauge():
         for game_id, schema in self.game_schemas.items():
             try:
                 # Try to unpack according to schema signature
-                gear, rpm = self.unpack_game_data(game_id, data)
+                gear, rpm, max_rpm = self.unpack_game_data(game_id, data)
                 
-                if gear in [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8] and (0 < rpm < 20000):                
+                if gear in [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] and (0 < rpm < 20000):                
                     # Game detected!
                     self.detected_game = game_id
                     print(f"Game: {schema.get('name', game_id)}")
+                    fields = schema.get("fields", {})
+                    gear_info = fields["gear"]
+                    self.gear_map = gear_info['map']
+                    if max_rpm:
+                        self.max_rpm = max_rpm
                     return game_id
             except Exception as e:
                 print(e)
@@ -205,14 +194,16 @@ class Gauge():
         fields = schema.get("fields", {})
         gear_info = fields["gear"]
         rpm_info = fields["rpm"]
-        
-        game_data = struct.unpack('64f', data[0:256])
 
-        gear = int(game_data[gear_info["offset"]]* gear_info["multiplier"])
-        rpm = int(game_data[rpm_info["offset"]] * rpm_info["multiplier"])
+        gear = int(struct.unpack_from(gear_info["format"], data, gear_info["offset"])[0] * gear_info["multiplier"])
+        rpm = int(struct.unpack_from(rpm_info["format"], data, rpm_info["offset"])[0] * rpm_info["multiplier"])
+        max_rpm = None
+        max_rpm_info = fields.get("max_rpm", None)
+        if max_rpm_info:
+            max_rpm = int(struct.unpack_from(max_rpm_info["format"], data, max_rpm_info["offset"])[0])
 
-        return gear, rpm
-        
+        return gear, rpm, max_rpm
+
     def set_gauge_level(self, level):
         # Exit idle mode if we're updating the gauge
         self.in_idle_mode = False
@@ -344,8 +335,11 @@ async def sim_task(gauge):
                         gear, rpm = gauge.unpack_game_data(game_id, data)
                         
                         if rpm is not None and gear is not None:
-                            if rpm > gauge.max_rpm:
-                                gauge.max_rpm = rpm
+                            if gauge.game_schemas[gauge.detected_game]["fields"].get("max_rpm", None) is not None:
+                                max_rpm = gauge.max_rpm
+                            else:
+                                if rpm > gauge.max_rpm:
+                                    gauge.max_rpm = rpm
                             
                             # Data received, update last data time
                             last_data_time = time.time()
@@ -367,8 +361,8 @@ async def sim_task(gauge):
 
                             # Update gear display only when gear changes
                             gear_str = str(gear) if isinstance(gear, int) else gear
-                            if gear_str in digits.digits and gear != last_gear:
-                                display_gear(digits.digits[gear_str])
+                            if gear != last_gear:
+                                display_gear(digits.digits[gauge.gear_map[gear_str]])
                                 last_gear = gear
                     
                 except OSError:
@@ -438,8 +432,7 @@ async def run_idle_animation(gauge):
         gauge.in_idle_mode = False
 
 async def main():
-    display_text("Sim Racing Dash", 0, 0)
-    display_text("Starting up...", 0, 16)
+    display_text("Starting up...", 0, 0)
     time.sleep(1)
     
     gauge = Gauge()
