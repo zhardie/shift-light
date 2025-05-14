@@ -1,18 +1,33 @@
 {
   "version": 3,
   "games": {
-    "dirt_rally_2": {
-      "name": "Dirt Rally 2.0",
+    "dirt_series": {
+      "name": "Dirt Series",
       "fields": {
         "gear": {
-          "offset": 33,
-          "format": "f",
+          "offset": 132,
+          "format": "<f",
           "multiplier": 1
         },
         "rpm": {
-          "offset": 37,
-          "format": "f",
+          "offset": 148,
+          "format": "<f",
           "multiplier": 10
+        }
+      }
+    },
+    "ea_wrc": {
+      "name": "EA WRC",
+      "fields": {
+        "gear": {
+          "offset": 37,
+          "format": "<B",
+          "multiplier": 1
+        },
+        "rpm": {
+          "offset": 193,
+          "format": "<f",
+          "multiplier": 1
         }
       }
     }
