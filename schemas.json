@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "games": {
     "dirt_series": {
       "name": "Dirt Series",
@@ -28,7 +28,7 @@
           "multiplier": 10
         },
         "max_rpm": {
-          "offset": 263,
+          "offset": 252,
           "format": "<f"
         }
       }
@@ -60,7 +60,7 @@
           "multiplier": 1
         },
         "max_rpm": {
-          "offset": 237,
+          "offset": 185,
           "format": "<f"
         }
       }
