@@ -26,6 +26,10 @@
           "offset": 148,
           "format": "<f",
           "multiplier": 10
+        },
+        "max_rpm": {
+          "offset": 237,
+          "format": "<f"
         }
       }
     },
@@ -54,6 +58,10 @@
           "offset": 193,
           "format": "<f",
           "multiplier": 1
+        },
+        "max_rpm": {
+          "offset": 263,
+          "format": "<f"
         }
       }
     }
