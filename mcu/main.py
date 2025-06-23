@@ -112,14 +112,15 @@ def check_schema_update():
         
         # Try to get remote schema info first to check version
         response = urequests.get(SCHEMA_URL)
+        print(response.json())
         if response.status_code != 200:
             display_text("Update check failed", 0, 0)
             time.sleep(1)
             return local_schema
             
         # Parse the remote schema
+        print(response)
         remote_schema = response.json()
-        print(remote_schema)
         response.close()
         remote_version = remote_schema.get("version", 0)
         
@@ -200,7 +201,7 @@ class Gauge():
         max_rpm = None
         max_rpm_info = fields.get("max_rpm", None)
         if max_rpm_info:
-            max_rpm = int(struct.unpack_from(max_rpm_info["format"], data, max_rpm_info["offset"])[0])
+            max_rpm = int(struct.unpack_from(max_rpm_info["format"], data, max_rpm_info["offset"])[0] * max_rpm_info["multiplier"])
 
         return gear, rpm, max_rpm
 
@@ -332,12 +333,13 @@ async def sim_task(gauge):
                     
                     if game_id:
                         # Process the data according to the game schema
-                        gear, rpm = gauge.unpack_game_data(game_id, data)
-                        
+                        gear, rpm, max_rpm_from_packet = gauge.unpack_game_data(game_id, data)
+
                         if rpm is not None and gear is not None:
-                            if gauge.game_schemas[gauge.detected_game]["fields"].get("max_rpm", None) is not None:
-                                max_rpm = gauge.max_rpm
-                            else:
+                            # Now handle max_rpm_from_packet
+                            if max_rpm_from_packet is not None: # If max_rpm was actually in the packet
+                                gauge.max_rpm = max_rpm_from_packet
+                            else: # Fallback to dynamic max_rpm if not in packet
                                 if rpm > gauge.max_rpm:
                                     gauge.max_rpm = rpm
                             
